@@ -1,0 +1,159 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+if game.PlaceId ~= 4490140733 then return end
+
+local Library = require(game:GetService("ReplicatedStorage"):WaitForChild("Framework"):WaitForChild("Library"))
+assert(Library, "Oops! Library has not been loaded. Try rejoining?")
+while not Library.Loaded do wait() end
+print("Library loaded!")
+
+-- Helper function to get paths within Library
+function GetPath(...)
+    local path = {...}
+    local result = Library
+    for _,v in ipairs(path) do
+        result = result[v]
+    end
+    return result
+end 
+
+-- Fetch key components from Library
+local Food, Entity, Customer, Waiter, Appliance, Bakery = 
+    GetPath("Food"), GetPath("Entity"), GetPath("Customer"), GetPath("Waiter"), GetPath("Appliance"), GetPath("Bakery")
+
+-- Toggleable Options
+local FastWaiter, FastOrder, GoldFood, AutoGift, AutoInteract = false, false, false, false, false
+
+-- Define optimized waiter action loop
+Waiter.StartActionLoop = function(waiter)
+    coroutine.wrap(function()
+        while not waiter.isDeleted do
+            waiter:PerformAction()
+            wait(FastWaiter and 0.1 or 1.5)
+        end
+    end)()
+end
+
+-- Check for queued customers with speed adjustments
+local Original_CheckForQueuedCustomers = Waiter.CheckForQueuedCustomers
+Waiter.CheckForQueuedCustomers = function(waiter)
+    if not FastWaiter then return Original_CheckForQueuedCustomers(waiter) end
+    
+    -- Add custom logic here as needed for fast processing
+    -- Check for a customer group in the queue ready to be seated
+    for _, customerGroup in ipairs(Library.Variables.MyBakery.customerQueue) do
+        if customerGroup[1].state == "WaitingForSeat" and not customerGroup[1].waiterIsAttendingToInQueue then
+            for _, customer in ipairs(customerGroup) do
+                customer.waiterIsAttendingToInQueue = true
+            end
+            -- Additional customer seating code here
+            return true
+        end
+    end
+    return false
+end
+
+-- Override the default customer order-checking function for speed
+local Original_CheckForCustomerOrder = Waiter.CheckForCustomerOrder
+Waiter.CheckForCustomerOrder = function(waiter)
+    if not FastWaiter then return Original_CheckForCustomerOrder(waiter) end
+    
+    local myFloor = waiter:GetMyFloor()
+    local waitingCustomer = myFloor:GetCustomerWaitingToOrder()
+    if waitingCustomer then
+        -- Process order logic here
+        waiter.state = "WalkingToTakeOrder"
+        return true
+    end
+    return false
+end
+
+-- Prevents the player from going idle
+if getconnections then
+    for _,v in ipairs(getconnections(game.Players.LocalPlayer.Idled)) do
+        v:Disable()
+    end
+end
+
+-- Load external UI library for settings
+local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/rafacasari/Rayfield/main/source'))()
+assert(Rayfield, "Oops! Rayfield not loaded. Try rejoining?")
+
+-- UI Setup
+local Window = Rayfield:CreateWindow({
+   Name = "My Restaurant!",
+   LoadingTitle = "Loading My Restaurant",
+   LoadingSubtitle = "by MilkUp Community",
+   ConfigurationSaving = {
+      Enabled = true,
+      FileName = "MyRestaurantSettings"
+   }
+})
+
+-- Farm Options Tab
+local FarmTab = Window:CreateTab("Farm")
+local SettingsSection = FarmTab:CreateSection("Farm Options")
+
+-- Toggles for various options
+FarmTab:CreateToggle({
+    Name = "Fast Order",
+    CurrentValue = false,
+    Flag = "FastOrder",
+    Callback = function(value) FastOrder = value end
+})
+
+FarmTab:CreateToggle({
+    Name = "Fast Waiter",
+    CurrentValue = false,
+    Flag = "FastWaiter",
+    Callback = function(value) FastWaiter = value end
+})
+
+FarmTab:CreateToggle({
+    Name = "Gold Food",
+    CurrentValue = false,
+    Flag = "GoldFood",
+    Callback = function(value) GoldFood = value end
+})
+
+FarmTab:CreateToggle({
+    Name = "Collect Gifts",
+    CurrentValue = false,
+    Flag = "AutoGift",
+    Callback = function(value) AutoGift = value end
+})
+
+-- Auto-interaction functionality for specific items
+local Wells = {"101", "49", "50"}
+local Slots = {"57"}
+
+local function UseWell(wellUID, wellId)
+    local event = (wellId == "101") and "RequestHauntedWishingWellUsage" or "RequestWishingWellUsage"
+    Library.Network.Fire(event, wellUID)
+    print("Collected from Wishing Well!")
+end
+
+local function AutoInteractFunction()
+    local bakeryData = Library.Variables.UIDData
+    if not bakeryData then return end
+    
+    for _, v in pairs(bakeryData["Furniture"]) do
+        if table.find(Wells, v.ID) then
+            UseWell(v.UID, v.ID)
+        elseif table.find(Slots, v.ID) then
+            Library.Network.Fire("RequestSlotUsage", v.UID)
+            print("Collected from Slot Machine!")
+        end
+    end
+end
+
+FarmTab:CreateToggle({
+    Name = "Auto Slot Machine/Wishing Well",
+    CurrentValue = false,
+    Flag = "AutoInteract",
+    Callback = function(value)
+        AutoInteract = value
+        if AutoInteract then
+            coroutine.wrap(AutoInteractFunction)()
+        end
+    end
+})
